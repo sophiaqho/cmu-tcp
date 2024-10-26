@@ -375,4 +375,20 @@ void *begin_backend(void *in) {
         // Send the SYN packet to the 
         sendto(sockfd, msg, plen, 0, (struct sockaddr *)&(sock->conn), conn_len);
         sock->state = SYN_SENT;
-        sock->retransmit_timer = get_current_time_
+        sock->retransmit_timer = get_current_time();
+        check_for_data(sock, NO_WAIT);
+      }
+    }
+
+    while (pthread_mutex_lock(&(sock->recv_lock)) != 0) {
+    }
+    send_signal = sock->received_len > 0;
+    pthread_mutex_unlock(&(sock->recv_lock));
+    
+    if (send_signal) {
+      pthread_cond_signal(&(sock->wait_cond));
+    }
+  }
+  pthread_exit(NULL);
+  return NULL;
+}
