@@ -25,6 +25,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/time.h>
 
 #include "cmu_packet.h"
 #include "cmu_tcp.h"
@@ -32,9 +33,15 @@
 #define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
 #define SYN_ACK_FLAG_MASK SYN_FLAG_MASK | ACK_FLAG_MASK
 
-bool has_timer_exceeded(cmu_socket_t* socket, uint64_t timeout_ms) {
+uint64_t get_current_time_ms() {
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  return (uint64_t)(tv.tv_sec) * 1000 + (tv.tv_usec / 1000);
+}
+
+bool has_timer_exceeded(cmu_socket_t* sock, uint64_t timeout_ms) {
   uint64_t current_time = get_current_time_ms();
-  return (current_time - socket->retransmit_timer) >= timeout_ms;
+  return (current_time - sock->retransmit_timer) >= timeout_ms;
 }
 
 /**
@@ -99,7 +106,7 @@ void send_syn_packet(cmu_socket_t *sock) {
 
   // Update socket state and set the retransmit timer
   sock->state = SYN_SENT;
-  sock->retransmit_timer = get_current_time();
+  sock->retransmit_timer = get_current_time_ms();
   printf("Socket state updated to SYN_SENT and retransmit timer set.\n");
 }
 
@@ -108,7 +115,6 @@ void send_syn_ack_packet(cmu_socket_t *sock) {
   size_t conn_len = sizeof(sock->conn);
   uint16_t payload_len = 0;
   int sockfd = sock->socket;
-  sock->window.next_seq_expected = get_seq(hdr) + 1;
 
   uint16_t src = sock->my_port;
   uint16_t dst = ntohs(sock->conn.sin_port);
@@ -173,6 +179,7 @@ void handle_message(cmu_socket_t *sock, uint8_t *pkt) {
     case SYN_FLAG_MASK: {
       if (sock->type == TCP_LISTENER && sock->state == LISTEN) {
         // If received a valid SYN packet, send a SYN_ACK packet back.
+        sock->window.next_seq_expected = get_seq(hdr) + 1;
         send_syn_ack_packet(sock);
       }
       break;
@@ -379,14 +386,14 @@ void single_send(cmu_socket_t *sock, uint8_t *data, int buf_len) {
 
 
 void check_syn_sent_timeout(cmu_socket_t *sock) {
-  if (has_timer_exceeded(socket, DEFAULT_TIMEOUT)) {
+  if (has_timer_exceeded(sock, DEFAULT_TIMEOUT)) {
     // Resend the SYN packet if the timer has exceeded
     send_syn_packet(sock);
   }
 }
 
 void check_syn_rcvd_timeout(cmu_socket_t *sock) {
-  if (has_timer_exceeded(socket, DEFAULT_TIMEOUT)) {
+  if (has_timer_exceeded(sock, DEFAULT_TIMEOUT)) {
     // Resend the SYN-ACK packet if the timer has exceeded
     send_syn_ack_packet(sock);
   } 
@@ -446,7 +453,7 @@ void *begin_backend(void *in) {
 
     // Check for incoming data without waiting
     check_for_data(sock, NO_WAIT);
-    printf("Checked for incoming data. Current received buffer length: %d\n", sock->received_len);
+    printf("Current socket state: %d\n", sock->state);
 
     // Handle specific socket states for timeout checks
     switch (sock->state) {
