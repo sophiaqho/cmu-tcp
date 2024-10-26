@@ -51,6 +51,111 @@ int has_been_acked(cmu_socket_t *sock, uint32_t seq) {
   return result;
 }
 
+void send_syn_packet(cmu_socket_t *sock) {
+  uint8_t *msg;
+  size_t conn_len = sizeof(sock->conn);
+  int sockfd = sock->socket;
+  
+  uint16_t payload_len = 0;
+  uint16_t src = sock->my_port;
+  uint16_t dst = ntohs(sock->conn.sin_port);
+  uint32_t seq = sock->window.last_ack_received;
+  uint32_t ack = sock->window.next_seq_expected;
+  uint16_t hlen = sizeof(cmu_tcp_header_t);
+  uint16_t plen = hlen + payload_len;
+  uint8_t flags = SYN_FLAG_MASK;
+  uint16_t adv_window = 1;
+  uint16_t ext_len = 0;
+  uint8_t *ext_data = NULL;
+  uint8_t *payload = NULL;
+
+  // Debug: Print SYN packet details before creation
+  printf("Constructing SYN packet:\n");
+  printf("Source Port: %u\n", src);
+  printf("Destination Port: %u\n", dst);
+  printf("Sequence Number: %u\n", seq);
+  printf("Acknowledgment Number: %u\n", ack);
+  printf("Header Length: %u\n", hlen);
+  printf("Packet Length: %u\n", plen);
+  printf("Flags: %u (SYN expected: %u)\n", flags, SYN_FLAG_MASK);
+
+  msg = create_packet(src, dst, seq, ack, hlen, plen, flags, adv_window,
+                      ext_len, ext_data, payload, payload_len);
+
+  // Debug: Verify packet contents
+  if (msg != NULL) {
+    printf("SYN packet created successfully.\n");
+  } else {
+    printf("Failed to create SYN packet.\n");
+    return;
+  }
+
+  // Send the SYN packet to the receiver
+  if (sendto(sockfd, msg, plen, 0, (struct sockaddr *)&(sock->conn), conn_len) != -1) {
+    printf("SYN packet sent successfully.\n");
+  } else {
+    perror("Failed to send SYN packet");
+  }
+
+  // Update socket state and set the retransmit timer
+  sock->state = SYN_SENT;
+  sock->retransmit_timer = get_current_time();
+  printf("Socket state updated to SYN_SENT and retransmit timer set.\n");
+}
+
+void send_syn_ack_packet(cmu_socket_t *sock) {
+  uint8_t *msg;
+  size_t conn_len = sizeof(sock->conn);
+  uint16_t payload_len = 0;
+  int sockfd = sock->socket;
+  sock->window.next_seq_expected = get_seq(hdr) + 1;
+
+  uint16_t src = sock->my_port;
+  uint16_t dst = ntohs(sock->conn.sin_port);
+  uint32_t seq = sock->window.last_ack_received;
+  uint32_t ack = sock->window.next_seq_expected;
+  uint16_t hlen = sizeof(cmu_tcp_header_t);
+  uint16_t plen = hlen;
+  uint8_t flags = SYN_ACK_FLAG_MASK;
+  uint16_t adv_window = 1;
+  uint16_t ext_len = 0;
+  uint8_t *ext_data = NULL;
+  uint8_t *payload = NULL;
+
+  // Debug: Print SYN-ACK packet details before creation
+  printf("Constructing SYN-ACK packet:\n");
+  printf("Source Port: %u\n", src);
+  printf("Destination Port: %u\n", dst);
+  printf("Sequence Number: %u\n", seq);
+  printf("Acknowledgment Number: %u\n", ack);
+  printf("Header Length: %u\n", hlen);
+  printf("Packet Length: %u\n", plen);
+  printf("Flags: %u (SYN-ACK expected: %u)\n", flags, SYN_ACK_FLAG_MASK);
+
+  msg = create_packet(src, dst, seq, ack, hlen, plen, flags, adv_window,
+                      ext_len, ext_data, payload, payload_len);
+
+  // Debug: Verify packet creation success
+  if (msg != NULL) {
+    printf("SYN-ACK packet created successfully.\n");
+  } else {
+    printf("Failed to create SYN-ACK packet.\n");
+    return;
+  }
+
+  // Send the SYN-ACK packet
+  if (sendto(sockfd, msg, plen, 0, (struct sockaddr *)&(sock->conn), conn_len) != -1) {
+    printf("SYN-ACK packet sent successfully.\n");
+  } else {
+    perror("Failed to send SYN-ACK packet");
+  }
+
+  // Update socket state and retransmit timer
+  sock->state = SYN_RCVD;
+  sock->retransmit_timer = get_current_time_ms();
+  printf("Socket state updated to SYN_RCVD and retransmit timer set.\n");
+}
+
 /**
  * Updates the socket information to represent the newly received packet.
  *
@@ -68,31 +173,7 @@ void handle_message(cmu_socket_t *sock, uint8_t *pkt) {
     case SYN_FLAG_MASK: {
       if (sock->type == TCP_LISTENER && sock->state == LISTEN) {
         // If received a valid SYN packet, send a SYN_ACK packet back.
-        uint8_t *msg;
-        size_t conn_len = sizeof(sock->conn);
-        uint16_t payload_len = 0;
-        int sockfd = sock->socket;
-        sock->window.next_seq_expected = get_seq(hdr) + 1;
-
-        uint16_t src = sock->my_port;
-        uint16_t dst = ntohs(sock->conn.sin_port);
-        uint32_t seq = sock->window.last_ack_received;
-        uint32_t ack = sock->window.next_seq_expected;
-        uint16_t hlen = sizeof(cmu_tcp_header_t);
-        uint16_t plen = hlen;
-        uint8_t flags = SYN_ACK_FLAG_MASK;
-        uint16_t adv_window = 1;
-        uint16_t ext_len = 0;
-        uint8_t *ext_data = NULL;
-        uint8_t *payload = NULL;
-      
-        msg = create_packet(src, dst, seq, ack, hlen, plen, flags, adv_window,
-                            ext_len, ext_data, payload, payload_len);
-        
-        // Then update the socket state to SYN_RCVD.
-        sendto(sockfd, msg, plen, 0, (struct sockaddr *)&(sock->conn), conn_len);
-        sock->state = SYN_RCVD;
-        sock->retransmit_timer = get_current_time_ms();
+        send_syn_ack_packet(sock);
       }
       break;
     }
@@ -296,15 +377,18 @@ void single_send(cmu_socket_t *sock, uint8_t *data, int buf_len) {
   }
 }
 
+
 void check_syn_sent_timeout(cmu_socket_t *sock) {
   if (has_timer_exceeded(socket, DEFAULT_TIMEOUT)) {
-    // Handle retransmission
+    // Resend the SYN packet if the timer has exceeded
+    send_syn_packet(sock);
   }
 }
 
 void check_syn_rcvd_timeout(cmu_socket_t *sock) {
   if (has_timer_exceeded(socket, DEFAULT_TIMEOUT)) {
-    // Handle retransmission
+    // Resend the SYN-ACK packet if the timer has exceeded
+    send_syn_ack_packet(sock);
   } 
 }
 
@@ -312,6 +396,8 @@ void *begin_backend(void *in) {
   cmu_socket_t *sock = (cmu_socket_t *)in;
   int death, buf_len, send_signal;
   uint8_t *data;
+
+  printf("Backend thread started for socket.\n");
 
   while (1) {
     while (pthread_mutex_lock(&(sock->death_lock)) != 0) {
@@ -324,10 +410,12 @@ void *begin_backend(void *in) {
     buf_len = sock->sending_len;
 
     if (death && buf_len == 0) {
+      printf("Socket marked for death and buffer empty. Exiting backend.\n");
       break;
     }
 
     if (buf_len > 0) {
+      printf("Data available to send, buffer length: %d\n", buf_len);
       data = malloc(buf_len);
       memcpy(data, sock->sending_buf, buf_len);
       sock->sending_len = 0;
@@ -336,6 +424,7 @@ void *begin_backend(void *in) {
       pthread_mutex_unlock(&(sock->send_lock));
       single_send(sock, data, buf_len);
       free(data);
+      printf("Data sent successfully.\n");
     } else {
       pthread_mutex_unlock(&(sock->send_lock));
     }
@@ -346,53 +435,44 @@ void *begin_backend(void *in) {
      * If the socket is an initiator, send a SYN packet and start a timeout.
      */
     if (sock->state == CLOSED) {
-      // Update server state to passively open
       if (sock->type == TCP_LISTENER) {
         sock->state = LISTEN;
+        printf("Socket state changed to LISTEN (passive open).\n");
       } else if (sock->type == TCP_INITIATOR) {
-        // Send a SYN packet and start a timeout timer
-        uint8_t *msg;
-        size_t conn_len = sizeof(sock->conn);
-        int sockfd = sock->socket;
-        
-        uint16_t payload_len = 0;
-        uint16_t src = sock->my_port;
-        uint16_t dst = ntohs(sock->conn.sin_port);
-        uint32_t seq = sock->window.last_ack_received;
-        uint32_t ack = sock->window.next_seq_expected;
-        uint16_t hlen = sizeof(cmu_tcp_header_t);
-        uint16_t plen = hlen + payload_len;
-        uint8_t flags = SYN_FLAG_MASK;
-        uint16_t adv_window = 1;
-        uint16_t ext_len = 0;
-        uint8_t *ext_data = NULL;
-        uint8_t *payload = NULL;
-
-        msg = create_packet(src, dst, seq, ack, hlen, plen, flags, adv_window,
-                            ext_len, ext_data, payload, payload_len);
-        buf_len -= payload_len;
-
-        // Send the SYN packet to the 
-        sendto(sockfd, msg, plen, 0, (struct sockaddr *)&(sock->conn), conn_len);
-        sock->state = SYN_SENT;
-        sock->retransmit_timer = get_current_time();
+        send_syn_packet(sock);
+        printf("Socket type INITIATOR: Sent SYN packet, state set to SYN_SENT.\n");
       }
     }
 
+    // Check for incoming data without waiting
     check_for_data(sock, NO_WAIT);
+    printf("Checked for incoming data. Current received buffer length: %d\n", sock->received_len);
+
+    // Handle specific socket states for timeout checks
+    switch (sock->state) {
+      case SYN_SENT:
+        printf("In SYN_SENT state, checking for SYN timeout.\n");
+        check_syn_sent_timeout(sock);
+        break;
+      
+      case SYN_RCVD:
+        printf("In SYN_RCVD state, checking for SYN-ACK timeout.\n");
+        check_syn_rcvd_timeout(sock);
+        break;
+    }
 
     while (pthread_mutex_lock(&(sock->recv_lock)) != 0) {
     }
-
     send_signal = sock->received_len > 0;
-
     pthread_mutex_unlock(&(sock->recv_lock));
 
     if (send_signal) {
+      printf("Received data, signaling condition variable.\n");
       pthread_cond_signal(&(sock->wait_cond));
     }
   }
 
+  printf("Backend thread exiting for socket.\n");
   pthread_exit(NULL);
   return NULL;
 }
