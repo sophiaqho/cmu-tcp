@@ -44,6 +44,20 @@ typedef enum {
  * This structure holds the state of a socket. You may modify this structure as
  * you see fit to include any additional state you need for your implementation.
  */
+typedef enum {
+  CLOSED = 0,
+  LISTEN = 1,
+  ESTABLISHED = 2,
+  CLOSING = 3,
+  SYN_SENT = 4,
+  SYN_RCVD = 5,
+  TIME_WAIT = 6,
+  LAST_ACK = 7,
+  CLOSE_WAIT = 8,
+  FIN_WAIT_1 = 9,
+  FIN_WAIT_2 = 10,
+} cmu_socket_state;
+
 typedef struct {
   int socket;
   pthread_t thread_id;
@@ -60,7 +74,13 @@ typedef struct {
   int dying;
   pthread_mutex_t death_lock;
   window_t window;
+  cmu_socket_state state;
+  uint64_t retransmit_timer;
 } cmu_socket_t;
+
+/**
+ * CMU-TCP socket types. (DO NOT CHANGE.)
+ */
 
 /*
  * DO NOT CHANGE THE DECLARATIONS BELOW

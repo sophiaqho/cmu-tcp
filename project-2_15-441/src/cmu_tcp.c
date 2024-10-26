@@ -103,6 +103,7 @@ int cmu_socket(cmu_socket_t *sock, const cmu_socket_type_t socket_type,
   }
   getsockname(sockfd, (struct sockaddr *)&my_addr, &len);
   sock->my_port = ntohs(my_addr.sin_port);
+  sock->state = CLOSED;
 
   pthread_create(&(sock->thread_id), NULL, begin_backend, (void *)sock);
   return EXIT_SUCCESS;
